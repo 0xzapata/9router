@@ -26,6 +26,9 @@ export default function APIPageClient({ machineId }) {
   const [hasPassword, setHasPassword] = useState(true);
   const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
 
+  // Privacy Shield state
+  const [privacyEnabled, setPrivacyEnabled] = useState(false);
+
   // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
   const [tunnelEnabled, setTunnelEnabled] = useState(false);
@@ -70,9 +73,10 @@ export default function APIPageClient({ machineId }) {
   const loadSettings = async () => {
     setTunnelChecking(true);
     try {
-      const [settingsRes, statusRes] = await Promise.all([
+      const [settingsRes, statusRes, privacyRes] = await Promise.all([
         fetch("/api/settings"),
-        fetch("/api/tunnel/status")
+        fetch("/api/tunnel/status"),
+        fetch("/api/privacy")
       ]);
       if (settingsRes.ok) {
         const data = await settingsRes.json();
@@ -134,6 +138,10 @@ export default function APIPageClient({ machineId }) {
           setTunnelEnabled(tEnabled);
         }
       }
+      if (privacyRes.ok) {
+        const privacyData = await privacyRes.json();
+        setPrivacyEnabled(privacyData.settings?.privacyEnabled || false);
+      }
     } catch (error) {
       console.log("Error loading settings:", error);
     } finally {
@@ -164,6 +172,21 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) setRequireApiKey(value);
     } catch (error) {
       console.log("Error updating requireApiKey:", error);
+    }
+  };
+
+  const handlePrivacyToggle = async (value) => {
+    try {
+      const res = await fetch("/api/privacy", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privacyEnabled: value }),
+      });
+      if (res.ok) {
+        setPrivacyEnabled(value);
+      }
+    } catch (error) {
+      console.log("Error updating privacy:", error);
     }
   };
 
@@ -794,6 +817,22 @@ export default function APIPageClient({ machineId }) {
           <Toggle
             checked={requireApiKey}
             onChange={() => handleRequireApiKey(!requireApiKey)}
+          />
+        </div>
+
+        {/* Privacy Shield Toggle */}
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="font-medium">Redact Sensitive Info</p>
+            </div>
+            <p className="text-sm text-text-muted">
+              Anonymize IPs, emails, hashes, and keys before sending to providers
+            </p>
+          </div>
+          <Toggle
+            checked={privacyEnabled}
+            onChange={() => handlePrivacyToggle(!privacyEnabled)}
           />
         </div>
 
