@@ -19,6 +19,7 @@ import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { anonymizeRequestBody, getPrivacySettings } from "@/lib/privacy";
 
 /**
  * Handle chat completion request
@@ -32,6 +33,13 @@ export async function handleChat(request, clientRawRequest = null) {
   } catch {
     log.warn("CHAT", "Invalid JSON body");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+  }
+
+  // Anonymize sensitive data in request body
+  const privacySettings = await getPrivacySettings();
+  if (privacySettings.privacyEnabled) {
+    body = await anonymizeRequestBody(body);
+    log.info("PRIVACY", "Request body anonymized");
   }
 
   // Build clientRawRequest for logging (if not provided)
