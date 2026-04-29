@@ -53,19 +53,8 @@ WORKDIR /app
 RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates bash && \
   git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
 
-# Install AI CLI agents globally with graceful fallbacks
-# Claude CLI
-RUN bun install -g @anthropic-ai/claude-code 2>/dev/null || echo "claude-code installation skipped"
-# Cursor CLI
-RUN bun install -g cursor-cli 2>/dev/null || echo "cursor-cli installation skipped"
-# Gemini CLI
-RUN bun install -g @google/generative-ai 2>/dev/null || echo "gemini-cli installation skipped"
-# Codex CLI
-RUN bun install -g @openai/codex 2>/dev/null || echo "codex installation skipped"
-# OpenClaw agent
-RUN bun install -g openclaw@latest 2>/dev/null || echo "openclaw installation skipped"
-# Droid CLI
-RUN bun install -g droid 2>/dev/null || echo "droid installation skipped"
+# Install Kilocode CLI only
+RUN bun install -g @kilocode/cli 2>/dev/null || echo "kilocode installation skipped"
 
 # Create persistent home directory structure for CLI configs and cache
 RUN mkdir -p /root/.config /root/.cache /root/.local/share /root/.ssh && chmod 700 /root/.ssh
