@@ -53,8 +53,10 @@ FROM runner AS runner-cli
 WORKDIR /app
 
 # Install system dependencies for CLI agents (git+ssh references, Python for some tools)
-RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates python3 python3-pip bash && \
-  git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
+# Note: python3-pip is not available in Alpine 3.22, use get-pip.py instead
+RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates python3 bash curl && \
+  git config --system url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+  curl -sS https://bootstrap.pypa.io/get-pip.py | python3
 
 # Install AI CLI agents globally with graceful fallbacks
 # Claude CLI
