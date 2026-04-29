@@ -49,11 +49,9 @@ CMD ["bun", "server.js"]
 FROM runner AS runner-cli
 WORKDIR /app
 
-# Install system dependencies for CLI agents (git+ssh references, Python for some tools)
-# Note: python3-pip is not available in Alpine 3.22, use get-pip.py instead
-RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates python3 bash curl && \
-  git config --system url."https://github.com/".insteadOf "ssh://git@github.com/" && \
-  curl -sS https://bootstrap.pypa.io/get-pip.py | python3 --break-system-packages
+# Install system dependencies for CLI agents (git+ssh references)
+RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates bash && \
+  git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
 
 # Install AI CLI agents globally with graceful fallbacks
 # Claude CLI
@@ -64,8 +62,6 @@ RUN bun install -g cursor-cli 2>/dev/null || echo "cursor-cli installation skipp
 RUN bun install -g @google/generative-ai 2>/dev/null || echo "gemini-cli installation skipped"
 # Codex CLI
 RUN bun install -g @openai/codex 2>/dev/null || echo "codex installation skipped"
-# Kimi CLI (Python-based)
-RUN pip3 install --no-cache-dir --break-system-packages kimi-cli 2>/dev/null || echo "kimi-cli installation skipped"
 # OpenClaw agent
 RUN bun install -g openclaw@latest 2>/dev/null || echo "openclaw installation skipped"
 # Droid CLI
