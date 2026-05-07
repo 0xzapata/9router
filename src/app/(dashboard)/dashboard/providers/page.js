@@ -24,6 +24,7 @@ import {
 import Link from "next/link";
 import { getErrorCode, getRelativeTime } from "@/shared/utils";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 
 function getStatusDisplay(connected, error, errorCode) {
@@ -103,6 +104,18 @@ export default function ProvidersPage() {
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const notify = useNotificationStore();
+  const searchQuery = useHeaderSearchStore((s) => s.query);
+  const registerSearch = useHeaderSearchStore((s) => s.register);
+  const unregisterSearch = useHeaderSearchStore((s) => s.unregister);
+
+  useEffect(() => {
+    registerSearch("Search providers...");
+    return () => unregisterSearch();
+  }, [registerSearch, unregisterSearch]);
+
+  const matchSearch = (name) =>
+    !searchQuery.trim() ||
+    name.toLowerCase().includes(searchQuery.trim().toLowerCase());
 
   useEffect(() => {
     const fetchData = async () => {
@@ -224,7 +237,8 @@ export default function ProvidersPage() {
       color: "#10A37F",
       textIcon: "OC",
       apiType: node.apiType,
-    }));
+    }))
+    .filter((p) => matchSearch(p.name));
 
   const anthropicCompatibleProviders = providerNodes
     .filter((node) => node.type === "anthropic-compatible")
@@ -233,7 +247,22 @@ export default function ProvidersPage() {
       name: node.name || "Anthropic Compatible",
       color: "#D97757",
       textIcon: "AC",
-    }));
+    }))
+    .filter((p) => matchSearch(p.name));
+
+  const oauthEntries = Object.entries(OAUTH_PROVIDERS).filter(([, info]) =>
+    matchSearch(info.name),
+  );
+  const freeEntries = Object.entries(FREE_PROVIDERS).filter(([, info]) =>
+    matchSearch(info.name),
+  );
+  const freeTierEntries = Object.entries(FREE_TIER_PROVIDERS).filter(
+    ([, info]) => matchSearch(info.name),
+  );
+  const apikeyEntries = Object.entries(APIKEY_PROVIDERS).filter(
+    ([, info]) =>
+      (info.serviceKinds ?? ["llm"]).includes("llm") && matchSearch(info.name),
+  );
 
   if (loading) {
     return (
@@ -244,9 +273,79 @@ export default function ProvidersPage() {
     );
   }
 
+  const hasAnyResult =
+    oauthEntries.length > 0 ||
+    freeEntries.length > 0 ||
+    freeTierEntries.length > 0 ||
+    apikeyEntries.length > 0 ||
+    compatibleProviders.length > 0 ||
+    anthropicCompatibleProviders.length > 0;
+
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+      {!hasAnyResult && (
+        <div className="text-center py-8 border border-dashed border-border rounded-xl">
+          <span className="material-symbols-outlined text-[32px] text-text-muted mb-2">
+            search_off
+          </span>
+          <p className="text-text-muted text-sm">No providers match your search</p>
+        </div>
+      )}
+
+      {/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+            Custom Providers (OpenAI/Anthropic Compatible){" "}
+          </h2>
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
+            <Button
+              size="sm"
+              icon="add"
+              onClick={() => setShowAddAnthropicCompatibleModal(true)}
+              className="w-full sm:w-auto"
+            >
+              Add Anthropic Compatible
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="add"
+              onClick={() => setShowAddCompatibleModal(true)}
+              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
+            >
+              Add OpenAI Compatible
+            </Button>
+          </div>
+        </div>
+        {compatibleProviders.length === 0 &&
+        anthropicCompatibleProviders.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
+            <span className="material-symbols-outlined text-[18px]">extension</span>
+            <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            {[...compatibleProviders, ...anthropicCompatibleProviders].map(
+              (info) => (
+                <ApiKeyProviderCard
+                  key={info.id}
+                  providerId={info.id}
+                  provider={info}
+                  stats={getProviderStats(info.id, "apikey")}
+                  authType="compatible"
+                  onToggle={(active) =>
+                    handleToggleProvider(info.id, "apikey", active)
+                  }
+                />
+              ),
+            )}
+          </div>
+        )}
+      </div>
+
       {/* OAuth Providers */}
+      {oauthEntries.length > 0 && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
@@ -275,7 +374,7 @@ export default function ProvidersPage() {
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {Object.entries(OAUTH_PROVIDERS).map(([key, info]) => (
+          {oauthEntries.map(([key, info]) => (
             <ProviderCard
               key={key}
               providerId={key}
@@ -287,8 +386,10 @@ export default function ProvidersPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Free Tier Providers */}
+      {(freeEntries.length > 0 || freeTierEntries.length > 0) && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
@@ -314,7 +415,7 @@ export default function ProvidersPage() {
           </button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {Object.entries(FREE_PROVIDERS).map(([key, info]) => (
+          {freeEntries.map(([key, info]) => (
             <ProviderCard
               key={key}
               providerId={key}
@@ -324,7 +425,7 @@ export default function ProvidersPage() {
               onToggle={(active) => handleToggleProvider(key, "oauth", active)}
             />
           ))}
-          {Object.entries(FREE_TIER_PROVIDERS).map(([key, info]) => (
+          {freeTierEntries.map(([key, info]) => (
             <ApiKeyProviderCard
               key={key}
               providerId={key}
@@ -336,8 +437,10 @@ export default function ProvidersPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* API Key Providers — fixed list */}
+      {apikeyEntries.length > 0 && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
@@ -363,20 +466,19 @@ export default function ProvidersPage() {
           </button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {Object.entries(APIKEY_PROVIDERS)
-            .filter(([, info]) => (info.serviceKinds ?? ["llm"]).includes("llm"))
-            .map(([key, info]) => (
-              <ApiKeyProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, "apikey")}
-                authType="apikey"
-                onToggle={(active) => handleToggleProvider(key, "apikey", active)}
-              />
-            ))}
+          {apikeyEntries.map(([key, info]) => (
+            <ApiKeyProviderCard
+              key={key}
+              providerId={key}
+              provider={info}
+              stats={getProviderStats(key, "apikey")}
+              authType="apikey"
+              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+            />
+          ))}
         </div>
       </div>
+      )}
 
       {/* Web Cookie Providers — use browser subscription cookie instead of API key */}
       {/* <div className="flex flex-col gap-4">
@@ -398,82 +500,6 @@ export default function ProvidersPage() {
           ))}
         </div>
       </div> */}
-
-      {/* API Key Compatible Providers — dynamic (OpenAI/Anthropic compatible) */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            API Key Compatible Providers{" "}
-          </h2>
-          <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
-            {/* {(compatibleProviders.length > 0 || anthropicCompatibleProviders.length > 0) && (
-              <button
-                onClick={() => handleBatchTest("compatible")}
-                disabled={!!testingMode}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${testingMode === "compatible"
-                  ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
-                  : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
-                  }`}
-                title="Test all Compatible connections"
-              >
-                <span className={`material-symbols-outlined text-[14px]${testingMode === "compatible" ? " animate-spin" : ""}`}>
-                  play_arrow
-                </span>
-                {testingMode === "compatible" ? "Testing..." : "Test All"}
-              </button>
-            )} */}
-            <Button
-              size="sm"
-              icon="add"
-              onClick={() => setShowAddAnthropicCompatibleModal(true)}
-              className="w-full sm:w-auto"
-            >
-              Add Anthropic Compatible
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon="add"
-              onClick={() => setShowAddCompatibleModal(true)}
-              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
-            >
-              Add OpenAI Compatible
-            </Button>
-          </div>
-        </div>
-        {compatibleProviders.length === 0 &&
-        anthropicCompatibleProviders.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-border rounded-xl">
-            <span className="material-symbols-outlined text-[32px] text-text-muted mb-2">
-              extension
-            </span>
-            <p className="text-text-muted text-sm">
-              No compatible providers added yet
-            </p>
-            <p className="text-text-muted text-xs mt-1">
-              Use the buttons above to add OpenAI or Anthropic compatible
-              endpoints
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {[...compatibleProviders, ...anthropicCompatibleProviders].map(
-              (info) => (
-                <ApiKeyProviderCard
-                  key={info.id}
-                  providerId={info.id}
-                  provider={info}
-                  stats={getProviderStats(info.id, "apikey")}
-                  authType="compatible"
-                  onToggle={(active) =>
-                    handleToggleProvider(info.id, "apikey", active)
-                  }
-                />
-              ),
-            )}
-          </div>
-        )}
-      </div>
 
       <AddOpenAICompatibleModal
         isOpen={showAddCompatibleModal}

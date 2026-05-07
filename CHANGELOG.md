@@ -1,3 +1,53 @@
+# v0.4.20 (2026-05-07)
+
+## Features
+- Add CommandCode provider support
+
+# v0.4.19 (2026-05-07)
+
+## Features
+- Add OllamaLocalExecutor cho local Ollama provider
+- Add audio input support cho Gemini translation
+- Add configurable tunnel transport protocols
+- Add model deselection trong ComboFormModal & ComboDetailPage
+- ComboFormModal/BaseUrlSelect: cloud endpoint option, custom URL local state, default first option
+- New API: `/v1/audio/voices`, `/v1/models/info`; `/v1/models` filter disabled models
+- CLI tool cards refactor dùng BaseUrlSelect
+
+## Fixes
+- Fix compatible provider API key setup
+- Fix usage: filter `totalRequests` theo time period đã chọn
+- Fix Kiro IDE MITM handler bugs (AWS CodeWhisperer translation)
+- geminiHelper: `ensureObjectType` cho schemas có properties nhưng thiếu type
+- initializeApp: guard tunnel/tailscale auto-resume once-per-process
+
+# v0.4.18 (2026-05-05)
+
+## Features
+- Speech-to-Text: full pipeline with sttCore + /v1/audio/transcriptions; configs for OpenAI, Gemini, Groq, Deepgram, AssemblyAI, HuggingFace, NVIDIA Parakeet; new 9router-stt skill
+- Gemini TTS: dedicated provider with 30 prebuilt voices
+- Usage quotas: GLM (intl/cn) and MiniMax (intl/cn) fetchers; Gemini CLI usage via retrieveUserQuota per-model buckets
+- Disabled models: lowdb-backed disabledModelsDb + /api/models/disabled route
+- Header search: reusable Zustand store wired into Header
+- CLI tools: Claude Cowork tool card + cowork-settings API
+- Providers: mediaPriority sorting in getProvidersByKind, add Kimi K2.6
+
+## Improvements
+- Expand media-providers/[kind]/[id] page; enhance OAuthModal, ModelSelectModal, ProviderTopology, ProxyPools, ProviderLimits
+- Refresh provider icons (alicode, byteplus, cloudflare-ai, nvidia, ollama, vertex, volcengine-ark); add aws-polly, fal-ai, jina-ai, recraft, runwayml, stability-ai, topaz, black-forest-labs
+- Reorder hermes provider, drop qwen STT kind
+
+## Fixes
+- Fix skills metadata/text in 9router, chat, embeddings, image, tts, web-fetch, web-search SKILL.md and skills page
+
+# v0.4.16 (2026-05-04)
+
+## Features
+- Skills system: manage and execute custom AI skills
+
+## Fixes
+- Fix input fields in tool cards
+
 # v0.4.14 (2026-05-03)
 
 ## Improvements

@@ -21,11 +21,14 @@ export default function ModelSelectModal({
   isOpen,
   onClose,
   onSelect,
+  onDeselect,
   selectedModel,
   activeProviders = [],
   title = "Select Model",
   modelAliases = {},
   kindFilter = null,
+  addedModelValues = [],
+  closeOnSelect = true,
 }) {
   // Filter activeProviders by serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
   const filteredActiveProviders = useMemo(() => {
@@ -40,6 +43,7 @@ export default function ModelSelectModal({
   const [combos, setCombos] = useState([]);
   const [providerNodes, setProviderNodes] = useState([]);
   const [customModels, setCustomModels] = useState([]);
+  const [disabledModels, setDisabledModels] = useState({});
 
   const fetchCombos = async () => {
     try {
@@ -89,6 +93,22 @@ export default function ModelSelectModal({
     if (isOpen) fetchCustomModels();
   }, [isOpen]);
 
+  const fetchDisabledModels = async () => {
+    try {
+      const res = await fetch("/api/models/disabled");
+      if (!res.ok) throw new Error(`Failed to fetch disabled models: ${res.status}`);
+      const data = await res.json();
+      setDisabledModels(data.disabled || {});
+    } catch (error) {
+      console.error("Error fetching disabled models:", error);
+      setDisabledModels({});
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchDisabledModels();
+  }, [isOpen]);
+
   const allProviders = useMemo(() => ({ ...OAUTH_PROVIDERS, ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...APIKEY_PROVIDERS }), []);
 
   // Group models by provider with priority order
@@ -104,7 +124,9 @@ export default function ModelSelectModal({
 
     // Filter a models[] array by kindFilter (keep only matching m.type)
     const filterByKind = (models) => {
-      if (!kindFilter || !TYPED_KINDS.has(kindFilter)) return models;
+      // No kindFilter → LLM context: keep only LLM models (no type or type === "llm")
+      if (!kindFilter) return models.filter((m) => m.isPlaceholder || !m.type || m.type === "llm");
+      if (!TYPED_KINDS.has(kindFilter)) return models;
       return models.filter((m) => m.isPlaceholder || m.type === kindFilter);
     };
 
@@ -239,11 +261,18 @@ export default function ModelSelectModal({
           .filter((m) => m.providerAlias === alias && !hardcodedIds.has(m.id) && !customAliasIds.has(m.id))
           .map((m) => ({ id: m.id, name: m.name || m.id, value: `${alias}/${m.id}`, isCustom: true }));
 
-        let allModels = filterByKind([
+        const merged = [
           ...hardcodedModels.map((m) => ({ id: m.id, name: m.name, value: `${alias}/${m.id}`, type: m.type })),
           ...customAliasModels,
           ...customRegisteredModels,
-        ]);
+        ];
+        // Dedupe by value (alias may equal hardcoded id, causing React key collision)
+        const seen = new Set();
+        let allModels = filterByKind(merged.filter((m) => {
+          if (seen.has(m.value)) return false;
+          seen.add(m.value);
+          return true;
+        }));
 
         // Provider-as-model fallback: providers that support the kind but have no hardcoded models
         // can still be picked (value = providerAlias). Skips embedding (always needs model).
@@ -265,8 +294,20 @@ export default function ModelSelectModal({
       }
     });
 
+    // Filter out disabled models per provider (disabled keyed by storage alias OR providerId)
+    Object.entries(groups).forEach(([providerId, group]) => {
+      const aliasKey = getProviderAlias(providerId);
+      const disabledIds = new Set([
+        ...(disabledModels[aliasKey] || []),
+        ...(disabledModels[providerId] || []),
+      ]);
+      if (disabledIds.size === 0) return;
+      group.models = group.models.filter((m) => !disabledIds.has(m.id));
+      if (group.models.length === 0) delete groups[providerId];
+    });
+
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, kindFilter]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders]);
 
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
@@ -304,9 +345,19 @@ export default function ModelSelectModal({
   }, [groupedModels, searchQuery]);
 
   const handleSelect = (model) => {
-    onSelect(model);
-    onClose();
-    setSearchQuery("");
+    const value = model?.value || model?.name || model;
+    const isAdded = addedModelValues.includes(value);
+
+    if (isAdded && onDeselect) {
+      onDeselect(model);
+    } else {
+      onSelect(model);
+    }
+
+    if (closeOnSelect) {
+      onClose();
+      setSearchQuery("");
+    }
   };
 
   return (
@@ -354,13 +405,18 @@ export default function ModelSelectModal({
                     key={combo.id}
                     onClick={() => handleSelect({ id: combo.name, name: combo.name, value: combo.name })}
                     className={`
-                      px-2 py-1 rounded-xl text-xs font-medium transition-all border hover:cursor-pointer
+                      px-2 py-1 rounded-xl text-xs font-medium transition-all border hover:cursor-pointer flex items-center gap-1
                       ${isSelected
                         ? "bg-primary text-white border-primary"
-                        : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
+                        : addedModelValues.includes(combo.name)
+                          ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400 hover:border-green-500/50"
+                          : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
                       }
                     `}
                   >
+                    {addedModelValues.includes(combo.name) && (
+                      <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                    )}
                     {combo.name}
                   </button>
                 );
@@ -401,21 +457,30 @@ export default function ModelSelectModal({
                         ? "border-dashed border-border text-text-muted hover:border-primary/50 hover:text-primary bg-surface italic"
                         : isSelected
                           ? "bg-primary text-white border-primary"
-                          : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
+                          : addedModelValues.includes(model.value)
+                            ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400 hover:border-green-500/50"
+                            : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
                       }
                     `}
                   >
-                    {isPlaceholder ? (
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[11px]">edit</span>
-                        {model.name}
-                      </span>
-                    ) : model.isCustom ? (
-                      <span className="flex items-center gap-1">
-                        {model.name}
-                        <span className="text-[9px] opacity-60 font-normal">custom</span>
-                      </span>
-                    ) : model.name}
+                    <span className="flex items-center gap-1">
+                      {addedModelValues.includes(model.value) && !isPlaceholder && (
+                        <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                      )}
+                      {isPlaceholder ? (
+                        <>
+                          <span className="material-symbols-outlined text-[11px]">edit</span>
+                          {model.name}
+                        </>
+                      ) : model.isCustom ? (
+                        <>
+                          {model.name}
+                          <span className="text-[9px] opacity-60 font-normal">custom</span>
+                        </>
+                      ) : (
+                        model.name
+                      )}
+                    </span>
                   </button>
                 );
               })}
@@ -440,6 +505,7 @@ ModelSelectModal.propTypes = {
   isOpen: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
   onSelect: PropTypes.func.isRequired,
+  onDeselect: PropTypes.func,
   selectedModel: PropTypes.string,
   activeProviders: PropTypes.arrayOf(
     PropTypes.shape({
@@ -449,5 +515,7 @@ ModelSelectModal.propTypes = {
   title: PropTypes.string,
   modelAliases: PropTypes.object,
   kindFilter: PropTypes.string,
+  addedModelValues: PropTypes.arrayOf(PropTypes.string),
+  closeOnSelect: PropTypes.bool,
 };
 

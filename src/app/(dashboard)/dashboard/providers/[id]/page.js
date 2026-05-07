@@ -28,6 +28,7 @@ export default function ProviderDetailPage() {
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
+  const [addConnectionError, setAddConnectionError] = useState("");
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
@@ -46,6 +47,7 @@ export default function ProviderDetailPage() {
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
+  const [disabledModelIds, setDisabledModelIds] = useState([]);
   const { copied, copy } = useCopyToClipboard();
 
   const providerInfo = providerNode
@@ -73,6 +75,62 @@ export default function ProviderDetailPage() {
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
     : providerAlias;
+
+  const fetchDisabledModels = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/models/disabled?providerAlias=${encodeURIComponent(providerStorageAlias)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok) setDisabledModelIds(data.ids || []);
+    } catch (error) {
+      console.log("Error fetching disabled models:", error);
+    }
+  }, [providerStorageAlias]);
+
+  const handleDisableModel = async (modelId) => {
+    try {
+      const res = await fetch("/api/models/disabled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerAlias: providerStorageAlias, ids: [modelId] }),
+      });
+      if (res.ok) await fetchDisabledModels();
+    } catch (error) {
+      console.log("Error disabling model:", error);
+    }
+  };
+
+  const handleEnableModel = async (modelId) => {
+    try {
+      const res = await fetch(`/api/models/disabled?providerAlias=${encodeURIComponent(providerStorageAlias)}&id=${encodeURIComponent(modelId)}`, { method: "DELETE" });
+      if (res.ok) await fetchDisabledModels();
+    } catch (error) {
+      console.log("Error enabling model:", error);
+    }
+  };
+
+  const handleDisableAll = async (ids) => {
+    if (!ids.length) return;
+    if (!confirm(`Disable all ${ids.length} model(s)?`)) return;
+    try {
+      const res = await fetch("/api/models/disabled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerAlias: providerStorageAlias, ids }),
+      });
+      if (res.ok) await fetchDisabledModels();
+    } catch (error) {
+      console.log("Error disabling all models:", error);
+    }
+  };
+
+  const handleEnableAll = async () => {
+    try {
+      const res = await fetch(`/api/models/disabled?providerAlias=${encodeURIComponent(providerStorageAlias)}`, { method: "DELETE" });
+      if (res.ok) await fetchDisabledModels();
+    } catch (error) {
+      console.log("Error enabling all models:", error);
+    }
+  };
 
   // Define callbacks BEFORE the useEffect that uses them
   const fetchAliases = useCallback(async () => {
@@ -237,7 +295,8 @@ export default function ProviderDetailPage() {
   useEffect(() => {
     fetchConnections();
     fetchAliases();
-  }, [fetchConnections, fetchAliases]);
+    fetchDisabledModels();
+  }, [fetchConnections, fetchAliases, fetchDisabledModels]);
 
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
@@ -301,18 +360,31 @@ export default function ProviderDetailPage() {
   };
 
   const handleSaveApiKey = async (formData) => {
+    setAddConnectionError("");
     try {
       const res = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: providerId, ...formData }),
       });
+
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
       if (res.ok) {
         await fetchConnections();
         setShowAddApiKeyModal(false);
+        return;
       }
+
+      setAddConnectionError(data?.error || "Failed to save connection");
     } catch (error) {
       console.log("Error saving connection:", error);
+      setAddConnectionError("Failed to save connection");
     }
   };
 
@@ -424,40 +496,47 @@ export default function ProviderDetailPage() {
     setShowBulkProxyModal(false);
   };
 
-  const handleBulkApplyProxyPool = async () => {
-    if (selectedConnectionIds.length === 0) return;
-
-    const proxyPoolId = bulkProxyPoolId === "__none__" ? null : bulkProxyPoolId;
+  const applyProxyAssignments = async (assignments) => {
     setBulkUpdatingProxy(true);
     try {
-      const results = [];
-      for (const connectionId of selectedConnectionIds) {
+      let failed = 0;
+      for (const { connectionId, proxyPoolId } of assignments) {
         try {
           const res = await fetch(`/api/providers/${connectionId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ proxyPoolId }),
           });
-          results.push(res.ok);
+          if (!res.ok) failed += 1;
         } catch (e) {
-          console.log("Error applying bulk proxy pool for", connectionId, e);
-          results.push(false);
+          console.log("Error applying proxy for", connectionId, e);
+          failed += 1;
         }
       }
-
-      const failedCount = results.filter((ok) => !ok).length;
-      if (failedCount > 0) {
-        alert(`Updated with ${failedCount} failed request(s).`);
-      }
-
+      if (failed > 0) alert(`Updated with ${failed} failed request(s).`);
       await fetchConnections();
-      clearSelection();
       setShowBulkProxyModal(false);
-    } catch (error) {
-      console.log("Error applying bulk proxy pool:", error);
     } finally {
       setBulkUpdatingProxy(false);
     }
+  };
+
+  const handleApplySinglePool = (proxyPoolId) => {
+    const targets = connections.map((c) => ({ connectionId: c.id, proxyPoolId }));
+    return applyProxyAssignments(targets);
+  };
+
+  const handleApplyOneToOne = () => {
+    const activePools = proxyPools.filter((p) => p.isActive === true);
+    if (activePools.length === 0) {
+      alert("No active proxy pools available.");
+      return;
+    }
+    const targets = connections.map((c, i) => ({
+      connectionId: c.id,
+      proxyPoolId: activePools[i % activePools.length].id,
+    }));
+    return applyProxyAssignments(targets);
   };
 
 
@@ -508,43 +587,53 @@ export default function ProviderDetailPage() {
     </div>
   );
 
-  const bulkProxyOptions = [
-    { value: "__none__", label: "None" },
-    ...proxyPools.map((pool) => ({ value: pool.id, label: pool.name })),
-  ];
-
-  const bulkHint = selectedConnectionIds.length === 0
-    ? "Select one or more connections, then click Proxy Action."
-    : selectedProxySummary;
-
-  const canApplyBulkProxy = selectedConnectionIds.length > 0 && !bulkUpdatingProxy;
+  const activePools = proxyPools.filter((p) => p.isActive === true);
 
   const bulkActionModal = (
     <Modal
       isOpen={showBulkProxyModal}
       onClose={closeBulkProxyModal}
-      title={`Proxy Action (${selectedConnectionIds.length} selected)`}
+      title={`Apply Proxy (${connections.length} connections)`}
     >
-      <div className="flex flex-col gap-4">
-        <Select
-          label="Proxy Pool"
-          value={bulkProxyPoolId}
-          onChange={(e) => setBulkProxyPoolId(e.target.value)}
-          options={bulkProxyOptions}
-          placeholder="None"
-        />
-
-        <p className="text-xs text-text-muted">{bulkHint}</p>
-        <p className="text-xs text-text-muted">Selecting None will unbind selected connections from proxy pool.</p>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={handleBulkApplyProxyPool} fullWidth disabled={!canApplyBulkProxy}>
-            {bulkUpdatingProxy ? "Applying..." : "Apply"}
-          </Button>
-          <Button onClick={closeBulkProxyModal} variant="ghost" fullWidth disabled={bulkUpdatingProxy}>
-            Cancel
-          </Button>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col">
+          <button
+            onClick={handleApplyOneToOne}
+            disabled={bulkUpdatingProxy || activePools.length === 0}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-text-muted text-[18px]">sync_alt</span>
+            <span className="text-sm text-text-main">One-to-one (rotate)</span>
+          </button>
+          <button
+            onClick={() => handleApplySinglePool(null)}
+            disabled={bulkUpdatingProxy}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-text-muted text-[18px]">link_off</span>
+            <span className="text-sm text-text-main">None (unbind all)</span>
+          </button>
+          {proxyPools.map((pool) => (
+            <button
+              key={pool.id}
+              onClick={() => handleApplySinglePool(pool.id)}
+              disabled={bulkUpdatingProxy || pool.isActive !== true}
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-text-muted text-[18px]">lan</span>
+              <span className="truncate text-sm text-text-main">{pool.name}</span>
+              {pool.isActive !== true && (
+                <span className="text-[10px] text-text-muted">(inactive)</span>
+              )}
+            </button>
+          ))}
         </div>
+
+        {bulkUpdatingProxy && <p className="text-xs text-text-muted">Applying...</p>}
+
+        <Button onClick={closeBulkProxyModal} variant="ghost" fullWidth disabled={bulkUpdatingProxy}>
+          Cancel
+        </Button>
       </div>
     </Modal>
   );
@@ -587,10 +676,13 @@ export default function ProviderDetailPage() {
     }
     // Combine hardcoded models with Kilo free models (deduplicated)
     // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
-    const displayModels = [
+    const allModels = [
       ...models,
       ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
     ].filter((m) => !m.type || m.type === "llm");
+    const disabledSet = new Set(disabledModelIds);
+    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
+    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
     // Custom models added by user (stored as aliases: modelId → providerAlias/modelId)
     const customModels = Object.entries(modelAliases)
       .filter(([alias, fullModel]) => {
@@ -610,6 +702,25 @@ export default function ProviderDetailPage() {
 
     return (
       <div className="flex flex-wrap gap-3">
+        {/* Custom models first */}
+        {customModels.map((model) => (
+          <ModelRow
+            key={model.id}
+            model={{ id: model.id }}
+            fullModel={`${providerDisplayAlias}/${model.id}`}
+            alias={model.alias}
+            copied={copied}
+            onCopy={copy}
+            onSetAlias={() => {}}
+            onDeleteAlias={() => handleDeleteAlias(model.alias)}
+            testStatus={modelTestResults[model.id]}
+            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
+            isTesting={testingModelId === model.id}
+            isCustom
+            isFree={false}
+          />
+        ))}
+
         {displayModels.map((model) => {
           const fullModel = `${providerStorageAlias}/${model.id}`;
           const oldFormatModel = `${providerId}/${model.id}`;
@@ -630,33 +741,15 @@ export default function ProviderDetailPage() {
               onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelId === model.id}
               isFree={model.isFree}
+              onDisable={() => handleDisableModel(model.id)}
             />
           );
         })}
 
-        {/* Custom models inline */}
-        {customModels.map((model) => (
-          <ModelRow
-            key={model.id}
-            model={{ id: model.id }}
-            fullModel={`${providerDisplayAlias}/${model.id}`}
-            alias={model.alias}
-            copied={copied}
-            onCopy={copy}
-            onSetAlias={() => {}}
-            onDeleteAlias={() => handleDeleteAlias(model.alias)}
-            testStatus={modelTestResults[model.id]}
-            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
-            isTesting={testingModelId === model.id}
-            isCustom
-            isFree={false}
-          />
-        ))}
-
         {/* Add model button — inline, same style as model chips */}
         <button
           onClick={() => setShowAddCustomModel(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-black/15 px-3 py-2 text-xs text-text-muted transition-colors hover:border-primary/40 hover:text-primary sm:w-auto"
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5 sm:w-auto"
         >
           <span className="material-symbols-outlined text-sm">add</span>
           Add Model
@@ -692,6 +785,26 @@ export default function ProviderDetailPage() {
             </div>
           );
         })()}
+
+        {/* Disabled models — restorable */}
+        {disabledDisplayModels.length > 0 && (
+          <div className="w-full mt-2">
+            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length}):</p>
+            <div className="flex flex-wrap gap-2">
+              {disabledDisplayModels.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => handleEnableModel(m.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                  title="Restore model"
+                >
+                  <span className="material-symbols-outlined text-[13px]">add</span>
+                  {m.id}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -819,11 +932,14 @@ export default function ProviderDetailPage() {
               <Button
                 size="sm"
                 icon="add"
-                onClick={() => setShowAddApiKeyModal(true)}
+                onClick={() => {
+                  setAddConnectionError("");
+                  setShowAddApiKeyModal(true);
+                }}
                 disabled={connections.length > 0}
                 className="w-full sm:w-auto"
               >
-                Add
+                Add API Key
               </Button>
               <Button
                 size="sm"
@@ -871,6 +987,16 @@ export default function ProviderDetailPage() {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold">Connections</h2>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              {connections.length > 0 && proxyPools.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon="lan"
+                  onClick={() => setShowBulkProxyModal(true)}
+                >
+                  Apply Proxy
+                </Button>
+              )}
               {/* Thinking config */}
               {/* {thinkingConfig && (
                 <div className="flex items-center gap-2">
@@ -918,18 +1044,27 @@ export default function ProviderDetailPage() {
                 </div>
                 <p className="text-sm text-text-muted">No connections yet</p>
               </div>
-              {!isCompatible && (
-                <div className="flex gap-2">
-                  {providerId === "iflow" && (
-                    <Button size="sm" icon="cookie" variant="secondary" onClick={() => setShowIFlowCookieModal(true)}>
-                      Cookie
-                    </Button>
-                  )}
-                  <Button size="sm" icon="add" onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}>
-                    {providerId === "iflow" ? "OAuth" : "Add Connection"}
+              <div className="flex gap-2">
+                {!isCompatible && providerId === "iflow" && (
+                  <Button size="sm" icon="cookie" variant="secondary" onClick={() => setShowIFlowCookieModal(true)}>
+                    Cookie
                   </Button>
-                </div>
-              )}
+                )}
+                <Button
+                  size="sm"
+                  icon="add"
+                  onClick={() => {
+                    if (isOAuth) {
+                      setShowOAuthModal(true);
+                      return;
+                    }
+                    setAddConnectionError("");
+                    setShowAddApiKeyModal(true);
+                  }}
+                >
+                  {isCompatible ? "Add API Key" : (providerId === "iflow" ? "OAuth" : "Add Connection")}
+                </Button>
+              </div>
             </div>
           ) : (
             <>
@@ -951,7 +1086,14 @@ export default function ProviderDetailPage() {
                   <Button
                     size="sm"
                     icon="add"
-                    onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}
+                    onClick={() => {
+                      if (isOAuth) {
+                        setShowOAuthModal(true);
+                        return;
+                      }
+                      setAddConnectionError("");
+                      setShowAddApiKeyModal(true);
+                    }}
                     className="w-full sm:w-auto"
                   >
                     Add
@@ -969,6 +1111,27 @@ export default function ProviderDetailPage() {
           <h2 className="text-lg font-semibold">
             {"Available Models"}
           </h2>
+          {!isCompatible && (() => {
+            const allIds = [
+              ...models,
+              ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
+            ].filter((m) => !m.type || m.type === "llm").map((m) => m.id);
+            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
+            return (
+              <div className="flex gap-2">
+                {disabledModelIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="restart_alt" onClick={handleEnableAll}>
+                    Active All
+                  </Button>
+                )}
+                {activeIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="block" onClick={() => handleDisableAll(activeIds)}>
+                    Disable All
+                  </Button>
+                )}
+              </div>
+            );
+          })()}
         </div>
         {!!modelsTestError && (
           <p className="text-xs text-red-500 mb-3 break-words">{modelsTestError}</p>
@@ -1025,8 +1188,12 @@ export default function ProviderDetailPage() {
         authHint={providerInfo?.authHint}
         website={providerInfo?.website}
         proxyPools={proxyPools}
+        error={addConnectionError}
         onSave={handleSaveApiKey}
-        onClose={() => setShowAddApiKeyModal(false)}
+        onClose={() => {
+          setAddConnectionError("");
+          setShowAddApiKeyModal(false);
+        }}
       />
       <EditConnectionModal
         isOpen={showEditModal}
