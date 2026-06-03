@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1.7
-ARG NODE_IMAGE=node:22-alpine
-FROM ${NODE_IMAGE} AS base
+FROM node:22.14.0-alpine3.21 AS builder
 WORKDIR /app
-
-FROM base AS builder
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
@@ -15,7 +12,7 @@ COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM ${NODE_IMAGE} AS runner
+FROM node:22.14.0-alpine3.21 AS runner
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="9router"
