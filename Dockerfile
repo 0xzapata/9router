@@ -15,6 +15,8 @@ RUN npm run build
 FROM node:22.14.0-alpine3.21 AS runner
 WORKDIR /app
 
+ARG CLAUDE_CODE_VERSION=2.1.259
+
 LABEL org.opencontainers.image.title="9router"
 
 ENV NODE_ENV=production
@@ -39,6 +41,8 @@ COPY --from=builder /app/node_modules/next ./node_modules/next
 COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
 # node-machine-id is createRequire-loaded at runtime; tracing omits it.
 COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machine-id
+
+RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
