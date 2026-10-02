@@ -36,8 +36,7 @@ RUN npm run build
 FROM ${NODE_IMAGE} AS runner
 ARG ALPINE_MIRROR
 ARG APP_VERSION
-ARG CLAUDE_CODE_VERSION=2.1.280
-ARG CODEX_VERSION=0.156.1
+ARG CLI_TOOLS_REFRESH=manual
 WORKDIR /app
 
 RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
@@ -70,18 +69,28 @@ COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
 # node-machine-id is createRequire-loaded at runtime; tracing omits it.
 COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machine-id
 
-RUN npm install --global --no-audit --no-fund \
-  @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-  @openai/codex@${CODEX_VERSION}
+RUN apk add --no-cache bash curl gcompat su-exec
+
+RUN --mount=type=cache,target=/root/.npm \
+  echo "CLI tools refresh: ${CLI_TOOLS_REFRESH}" && \
+  npm install --global --no-audit --no-fund --prefer-online \
+    @anthropic-ai/claude-code@latest \
+    @openai/codex@latest \
+    opencode-ai@latest \
+    cline@latest && \
+  curl -fsSL https://cli.devin.ai/install.sh | HOME=/tmp/devin-install bash && \
+  cp -L /tmp/devin-install/.local/bin/devin /usr/local/bin/devin && \
+  chmod 0755 /usr/local/bin/devin && \
+  rm -rf /tmp/devin-install && \
+  claude --version && codex --version && opencode --version && \
+  cline --version && devin --version
 
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
   ln -sf /app/data-home /root/.9router 2>/dev/null || true
 
-# Avoid a full distribution upgrade in the runtime image. It makes builds less
-# reproducible and is unrelated to installing the runtime entrypoint helper.
-RUN apk add --no-cache su-exec && \
-  printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
+# Fix mounted-volume permissions before starting the app as the node user.
+RUN printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
   chmod +x /entrypoint.sh
 
 EXPOSE 20128

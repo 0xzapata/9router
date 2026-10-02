@@ -58,6 +58,8 @@ jobs:
           context: .
           target: runner
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            CLI_TOOLS_REFRESH=${{ github.run_id }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
