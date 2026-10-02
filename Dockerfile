@@ -1,23 +1,17 @@
 # syntax=docker/dockerfile:1.7
-ARG NODE_IMAGE=node:22.14.0-alpine3.21
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
+ARG NODE_IMAGE=node:22-bookworm-slim
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ARG APP_VERSION=unknown
 
 FROM ${NODE_IMAGE} AS base
-ARG ALPINE_MIRROR
 WORKDIR /app
-
-# Use the official Alpine mirror by default. A repository variable/build arg can
-# override it for environments that require a regional mirror.
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-      sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
-    fi
 
 FROM base AS builder
 ARG NPM_REGISTRY
 
-RUN apk add --no-cache python3 make g++ linux-headers
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends python3 make g++ && \
+  rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
 RUN --mount=type=cache,target=/root/.npm \
@@ -34,14 +28,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM ${NODE_IMAGE} AS runner
-ARG ALPINE_MIRROR
 ARG APP_VERSION
 ARG CLI_TOOLS_REFRESH=manual
 WORKDIR /app
-
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-      sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
-    fi
 
 LABEL org.opencontainers.image.title="9router" \
       org.opencontainers.image.version="${APP_VERSION}"
@@ -69,7 +58,9 @@ COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
 # node-machine-id is createRequire-loaded at runtime; tracing omits it.
 COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machine-id
 
-RUN apk add --no-cache bash curl gcompat su-exec
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends bash ca-certificates curl gosu && \
+  rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.npm \
   echo "CLI tools refresh: ${CLI_TOOLS_REFRESH}" && \
@@ -97,7 +88,7 @@ RUN mkdir -p /app/data && chown -R node:node /app && \
   ln -sf /app/data-home /root/.9router 2>/dev/null || true
 
 # Fix mounted-volume permissions before starting the app as the node user.
-RUN printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
+RUN printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec gosu node "$@"\n' > /entrypoint.sh && \
   chmod +x /entrypoint.sh
 
 EXPOSE 20128
