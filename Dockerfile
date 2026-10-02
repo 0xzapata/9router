@@ -78,8 +78,15 @@ RUN --mount=type=cache,target=/root/.npm \
     @openai/codex@latest \
     opencode-ai@latest \
     cline@latest && \
-  curl -fsSL https://cli.devin.ai/install.sh | HOME=/tmp/devin-install bash && \
-  cp -L /tmp/devin-install/.local/bin/devin /usr/local/bin/devin && \
+  DEVIN_TARGET="$(case "$(uname -m)" in x86_64) echo x86_64-unknown-linux ;; aarch64) echo aarch64-unknown-linux ;; esac)" && \
+  DEVIN_MANIFEST="$(curl -fsSL https://static.devin.ai/cli/current/manifest.json)" && \
+  DEVIN_URL="$(DEVIN_MANIFEST="$DEVIN_MANIFEST" DEVIN_TARGET="$DEVIN_TARGET" node -p 'JSON.parse(process.env.DEVIN_MANIFEST).platforms[process.env.DEVIN_TARGET].url')" && \
+  DEVIN_SHA="$(DEVIN_MANIFEST="$DEVIN_MANIFEST" DEVIN_TARGET="$DEVIN_TARGET" node -p 'JSON.parse(process.env.DEVIN_MANIFEST).platforms[process.env.DEVIN_TARGET].sha256')" && \
+  mkdir -p /tmp/devin-install && \
+  curl -fsSL "$DEVIN_URL" -o /tmp/devin-install/devin.tar.gz && \
+  echo "$DEVIN_SHA  /tmp/devin-install/devin.tar.gz" | sha256sum -c - && \
+  tar -xzf /tmp/devin-install/devin.tar.gz -C /tmp/devin-install && \
+  cp /tmp/devin-install/bin/devin /usr/local/bin/devin && \
   chmod 0755 /usr/local/bin/devin && \
   rm -rf /tmp/devin-install && \
   claude --version && codex --version && opencode --version && \
