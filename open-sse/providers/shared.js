@@ -22,7 +22,9 @@ export function mapStainlessArch() {
 
 // Anthropic API version (single source — reused across claude-format providers/executors)
 export const ANTHROPIC_API_VERSION = "2023-06-01";
-export const CLAUDE_CLI_VERSION = "2.1.290";
+// Anthropic gates new models on this fingerprint version. Override with the
+// CLAUDE_CLI_VERSION env var (runtime, no rebuild); the default is the validated release.
+export const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION?.trim() || "2.1.290";
 
 // Shared Claude-compatible API headers (reused across claude-format providers)
 export const CLAUDE_API_HEADERS = {
